@@ -77,9 +77,9 @@ class MeawZikApp(ctk.CTk):
 
     def configurar_teclas_midia(self):
         try:
-            keyboard.add_hotkey('Play/Pause', lambda: self.after(0, self.alternar_play_pause))
-            keyboard.add_hotkey('Next', lambda: self.after(0, self.proxima_musica))
-            keyboard.add_hotkey('Previous', lambda: self.after(0, self.musica_anterior))
+            keyboard.add_hotkey('play/pause media', lambda: self.after(0, self.alternar_play_pause))
+            keyboard.add_hotkey('next track', lambda: self.after(0, self.proxima_musica))
+            keyboard.add_hotkey('previous track', lambda: self.after(0, self.musica_anterior))
         except Exception as e:
             print(f"[!] Aviso: Não foi possível registrar as teclas de mídia globais ({e})")
 
