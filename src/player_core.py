@@ -4,7 +4,6 @@ import vlc
 
 class MeawZikCore:
     def __init__(self):
-        # Configuração do Player VLC
         self.vlc_instance = vlc.Instance('--no-video')
         self.player = self.vlc_instance.media_player_new()
         
@@ -112,11 +111,11 @@ class MeawZikCore:
         if self.player.is_playing():
             self.player.pause()
             self.is_playing_state = False
-            return False # Pausado
+            return False 
         else:
             self.player.play()
             self.is_playing_state = True
-            return True # Tocando
+            return True
 
     def parar(self):
         self.player.stop()
