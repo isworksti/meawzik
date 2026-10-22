@@ -1,40 +1,54 @@
+import os
+import sys
 import tkinter as tk
 import customtkinter as ctk
-import keyboard
+from PIL import Image, ImageTk
+
+# Importamos a classe do player
 from player_core import MeawZikCore
 
-# Configuração inicial do tema do CustomTkinter
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-class MeawZikApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
+def resource_path(relative_path):
+    """ Obtém o caminho absoluto para os recursos no PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
-        self.title("Meaw-Zik - Player Minimalista")
+class MeawZikPlayerWindow(ctk.CTkToplevel):
+    """ Janela principal do Player (Modo Solo) """
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Meaw-Zik - Sessão Solo")
         self.geometry("600x450")
         self.resizable(False, False)
 
-      
-        self.iconbitmap("src/meawzik.ico")
+        # Configurar ícone
+        try:
+            caminho_ico = resource_path("meawzik.ico")
+            if os.path.exists(caminho_ico):
+                img_pil = Image.open(caminho_ico)
+                self.icone_app = ImageTk.PhotoImage(img_pil)
+                self.iconphoto(True, self.icone_app)
+        except Exception as e:
+            print(f"[!] Erro ao carregar ícone: {e}")
 
-        
         self.core = MeawZikCore()
 
-        
-
-        
+        # --- LAYOUT DO PLAYER ---
         self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.top_frame.pack(fill="x", padx=20, pady=15)
 
-        self.url_entry = ctk.CTkEntry(self.top_frame, placeholder_text="Cole o link ou digite o nome de uma música/artista/playlist...", width=430)
+        self.url_entry = ctk.CTkEntry(self.top_frame, placeholder_text="Cole o link ou digite o nome de uma música...", width=430)
         self.url_entry.pack(side="left", padx=(0, 10))
         self.url_entry.bind("<Return>", lambda event: self.ao_clicar_buscar())
 
         self.load_btn = ctk.CTkButton(self.top_frame, text="Buscar / Carregar", width=120, command=self.ao_clicar_buscar)
         self.load_btn.pack(side="right")
 
-        
         self.list_frame = ctk.CTkFrame(self)
         self.list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 15))
 
@@ -48,52 +62,20 @@ class MeawZikApp(ctk.CTk):
             font=("Arial", 10)
         )
         self.playlist_box.pack(fill="both", expand=True, padx=10, pady=10)
-        self.playlist_box.bind('<Double-1>', self.ao_clicar_musica_duplo)
 
-    
         self.status_label = ctk.CTkLabel(self, text="Status: Pronto", font=("Arial", 11), text_color="gray")
         self.status_label.pack(padx=20, anchor="w")
 
         self.control_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.control_frame.pack(fill="x", padx=20, pady=(5, 15))
 
-        self.prev_btn = ctk.CTkButton(self.control_frame, text="⏮ Anterior", width=100, command=self.musica_anterior)
-        self.prev_btn.pack(side="left")
-
         self.play_pause_btn = ctk.CTkButton(self.control_frame, text="▶ Play", width=120, command=self.alternar_play_pause)
-        self.play_pause_btn.pack(side="left", padx=10)
-
-        self.next_btn = ctk.CTkButton(self.control_frame, text="Próxima ⏭", width=100, command=self.proxima_musica)
-        self.next_btn.pack(side="left")
-
-        self.stop_btn = ctk.CTkButton(self.control_frame, text="⏹ Parar", width=100, fg_color="#b33939", hover_color="#8b2626", command=self.parar_musica)
-        self.stop_btn.pack(side="right")
-
-    
-        self.configurar_teclas_midia()
-
-        
-        self.monitorar_reproducao()
-
-    def configurar_teclas_midia(self):
-        try:
-            keyboard.add_hotkey('play/pause media', lambda: self.after(0, self.alternar_play_pause))
-            keyboard.add_hotkey('next track', lambda: self.after(0, self.proxima_musica))
-            keyboard.add_hotkey('previous track', lambda: self.after(0, self.musica_anterior))
-        except Exception as e:
-            print(f"[!] Aviso: Não foi possível registrar as teclas de mídia globais ({e})")
+        self.play_pause_btn.pack(side="left")
 
     def ao_clicar_buscar(self):
         termo = self.url_entry.get().strip()
         if not termo:
             return
-        
-        if termo.startswith("http://") or termo.startswith("https://"):
-            self.status_label.configure(text="Status: Analisando link do YouTube...")
-        else:
-            self.status_label.configure(text=f"Status: Pesquisando por '{termo}'...")
-
-        self.load_btn.configure(state="disabled")
         self.core.carregar_midia(termo, self.sucesso_carregamento, self.erro_carregamento)
 
     def sucesso_carregamento(self, nova_fila):
@@ -103,99 +85,65 @@ class MeawZikApp(ctk.CTk):
         self.playlist_box.delete(0, tk.END)
         for i, faixa in enumerate(nova_fila):
             self.playlist_box.insert(tk.END, f"{i+1}. {faixa['title']}")
-        
-        if nova_fila:
-            self.status_label.configure(text=f"Status: Pronto ({len(nova_fila)} itens válidos)")
-        else:
-            self.status_label.configure(text="Status: Nenhum resultado encontrado.")
-        
-        self.load_btn.configure(state="normal")
 
     def erro_carregamento(self, erro_msg):
-        self.after(0, lambda: self._tratar_erro_ui(erro_msg))
-
-    def _tratar_erro_ui(self, erro_msg):
-        self.status_label.configure(text=f"Status: Erro ao carregar ({erro_msg})")
-        self.load_btn.configure(state="normal")
-
-    def tocar_faixa_ui(self, indice):
-        if 0 <= indice < len(self.core.fila):
-            self.status_label.configure(text="Status: Obtendo áudio...")
-            self.core.tocar_faixa(indice, self.sucesso_streaming, self.erro_streaming)
-
-    def sucesso_streaming(self, titulo, indice):
-        self.after(0, lambda: self.status_label.configure(text=f"Tocando: {titulo}"))
-        self.after(0, lambda: self.play_pause_btn.configure(text="⏸ Pausar"))
-        self.after(0, lambda: self.destacar_item_lista(indice))
-
-    def erro_streaming(self, erro_msg):
-        self.after(0, lambda: self.status_label.configure(text="Status: Vídeo indisponível, pulando..."))
-        self.after(1000, self.proxima_musica)
-
-    def destacar_item_lista(self, indice):
-        self.playlist_box.selection_clear(0, tk.END)
-        self.playlist_box.selection_set(indice)
-        self.playlist_box.see(indice)
-
-    def ao_clicar_musica_duplo(self, event):
-        selecao = self.playlist_box.curselection()
-        if not selecao:
-            return
-        
-        indice = selecao[0]
-        faixa = self.core.fila[indice]
-        url = faixa['url']
-
-        if "list=" in url or "playlist" in url:
-            self.status_label.configure(text="Status: Carregando conteúdo da playlist...")
-            self.load_btn.configure(state="disabled")
-            
-            self.url_entry.delete(0, tk.END)
-            self.url_entry.insert(0, url)
-            
-            self.core.carregar_midia(url, self.sucesso_carregamento, self.erro_carregamento)
-        else:
-            self.tocar_faixa_ui(indice)
+        pass
 
     def alternar_play_pause(self):
         if not self.core.fila:
             return
-        
         tocando = self.core.alternar_play_pause()
         if tocando:
             self.play_pause_btn.configure(text="⏸ Pausar")
-            self.status_label.configure(text="Status: Reproduzindo")
         else:
-            if self.core.indice_atual == -1 and self.core.fila:
-                self.tocar_faixa_ui(0)
-            else:
-                self.play_pause_btn.configure(text="▶ Play")
-                self.status_label.configure(text="Status: Pausado")
+            self.play_pause_btn.configure(text="▶ Play")
 
-    def proxima_musica(self):
-        if self.core.fila and self.core.indice_atual < len(self.core.fila) - 1:
-            self.tocar_faixa_ui(self.core.indice_atual + 1)
 
-    def musica_anterior(self):
-        if self.core.fila and self.core.indice_atual > 0:
-            self.tocar_faixa_ui(self.core.indice_atual - 1)
+class MeawZikHome(ctk.CTk):
+    """ Ecrã Inicial / Menu Principal """
+    def __init__(self):
+        super().__init__()
 
-    def parar_musica(self):
-        self.core.parar()
-        self.play_pause_btn.configure(text="▶ Play")
-        self.status_label.configure(text="Status: Parado")
+        self.title("Meaw-Zik - Início")
+        self.geometry("400x300")
+        self.resizable(False, False)
 
-    def monitorar_reproducao(self):
-        if self.core.verificar_fim_musica():
-            if self.core.indice_atual < len(self.core.fila) - 1:
-                self.proxima_musica()
-            else:
-                self.core.is_playing_state = False
-                self.play_pause_btn.configure(text="▶ Play")
-                self.status_label.configure(text="Status: Fila finalizada")
-        
-        self.after(1000, self.monitorar_reproducao)
+        try:
+            caminho_ico = resource_path("meawzik.ico")
+            if os.path.exists(caminho_ico):
+                img_pil = Image.open(caminho_ico)
+                self.icone_app = ImageTk.PhotoImage(img_pil)
+                self.iconphoto(True, self.icone_app)
+        except Exception as e:
+            print(f"[!] Erro ao carregar ícone: {e}")
+
+        # Elementos do Ecrã Inicial
+        self.label_titulo = ctk.CTkLabel(self, text="🎵 Meaw-Zik", font=("Arial", 24, "bold"))
+        self.label_titulo.pack(pady=(40, 20))
+
+        self.label_sub = ctk.CTkLabel(self, text="Escolha o modo de reprodução", font=("Arial", 12), text_color="gray")
+        self.label_sub.pack(pady=(5, 20))
+
+        # Botão Sessão Solo
+        self.btn_solo = ctk.CTkButton(self, text="🎧 Sessão Solo", width=220, height=40, font=("Arial", 14), command=self.abrir_solo)
+        self.btn_solo.pack(pady=10)
+
+        # Botão Sessão em Grupo (Placeholder)
+        self.btn_grupo = ctk.CTkButton(self, text="👥 Sessão em Grupo", width=220, height=40, font=("Arial", 14), fg_color="#4b4b4b", hover_color="#333333", command=self.abrir_grupo)
+        self.btn_grupo.pack(pady=10)
+
+    def abrir_solo(self):
+        self.withdraw()
+        player_janela = MeawZikPlayerWindow(self)
+        player_janela.protocol("WM_DELETE_WINDOW", lambda: self.fechar_player(player_janela))
+
+    def abrir_grupo(self):
+        print("[*] Funcionalidade de grupo em breve...")
+
+    def fechar_player(self, janela_player):
+        janela_player.destroy()
+        self.deiconify()
 
 if __name__ == "__main__":
-    app = MeawZikApp()
+    app = MeawZikHome()
     app.mainloop()
