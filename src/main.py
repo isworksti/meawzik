@@ -4,18 +4,19 @@ import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
-# Importamos a classe do player
+# Importação atualizada para a estrutura modular dentro da pasta group
+from group.group_controller import MeawZikGroupWindow
 from player_core import MeawZikCore
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
 def resource_path(relative_path):
-    """ Obtém o caminho absoluto para os recursos no PyInstaller """
+    """ Obtém o caminho absoluto para os recursos no PyInstaller ou desenvolvimento """
     try:
         base_path = sys._MEIPASS
     except Exception:
-        base_path = os.path.abspath(".")
+        base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
 class MeawZikPlayerWindow(ctk.CTkToplevel):
@@ -26,21 +27,28 @@ class MeawZikPlayerWindow(ctk.CTkToplevel):
         self.geometry("600x450")
         self.resizable(False, False)
 
-        # Configurar ícone
         try:
             caminho_ico = resource_path("meawzik.ico")
             if os.path.exists(caminho_ico):
-                img_pil = Image.open(caminho_ico)
-                self.icone_app = ImageTk.PhotoImage(img_pil)
-                self.iconphoto(True, self.icone_app)
+                self.iconbitmap(caminho_ico)
         except Exception as e:
             print(f"[!] Erro ao carregar ícone: {e}")
 
         self.core = MeawZikCore()
 
         # --- LAYOUT DO PLAYER ---
+        self.top_nav_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.top_nav_frame.pack(fill="x", padx=20, pady=(15, 0))
+
+        self.btn_voltar = ctk.CTkButton(
+            self.top_nav_frame, text="⬅ Voltar", width=140, 
+            fg_color="#555555", hover_color="#444444", command=self.voltar_ao_menu
+        )
+        self.btn_voltar.pack(side="left")
+
+        # Frame para os controlos de busca (URL / Nome)
         self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.top_frame.pack(fill="x", padx=20, pady=15)
+        self.top_frame.pack(fill="x", padx=20, pady=10)
 
         self.url_entry = ctk.CTkEntry(self.top_frame, placeholder_text="Cole o link ou digite o nome de uma música...", width=430)
         self.url_entry.pack(side="left", padx=(0, 10))
@@ -89,6 +97,11 @@ class MeawZikPlayerWindow(ctk.CTkToplevel):
     def erro_carregamento(self, erro_msg):
         pass
 
+    def voltar_ao_menu(self):
+        """ Fecha a janela do player e reabre o menu principal """
+        self.destroy()
+        self.master.deiconify()
+
     def alternar_play_pause(self):
         if not self.core.fila:
             return
@@ -111,9 +124,7 @@ class MeawZikHome(ctk.CTk):
         try:
             caminho_ico = resource_path("meawzik.ico")
             if os.path.exists(caminho_ico):
-                img_pil = Image.open(caminho_ico)
-                self.icone_app = ImageTk.PhotoImage(img_pil)
-                self.iconphoto(True, self.icone_app)
+                self.iconbitmap(caminho_ico)
         except Exception as e:
             print(f"[!] Erro ao carregar ícone: {e}")
 
@@ -128,7 +139,7 @@ class MeawZikHome(ctk.CTk):
         self.btn_solo = ctk.CTkButton(self, text="🎧 Sessão Solo", width=220, height=40, font=("Arial", 14), command=self.abrir_solo)
         self.btn_solo.pack(pady=10)
 
-        # Botão Sessão em Grupo (Placeholder)
+        # Botão Sessão em Grupo
         self.btn_grupo = ctk.CTkButton(self, text="👥 Sessão em Grupo", width=220, height=40, font=("Arial", 14), fg_color="#4b4b4b", hover_color="#333333", command=self.abrir_grupo)
         self.btn_grupo.pack(pady=10)
 
@@ -138,7 +149,15 @@ class MeawZikHome(ctk.CTk):
         player_janela.protocol("WM_DELETE_WINDOW", lambda: self.fechar_player(player_janela))
 
     def abrir_grupo(self):
-        print("[*] Funcionalidade de grupo em breve...")
+        """ Esconde o menu inicial e abre a janela de sessão em grupo P2P """
+        self.withdraw()
+        grupo_janela = MeawZikGroupWindow(self)
+        grupo_janela.protocol("WM_DELETE_WINDOW", lambda: self.fechar_grupo(grupo_janela))
+
+    def fechar_grupo(self, janela_grupo):
+        """ Fecha a janela de grupo e retorna ao menu principal """
+        janela_grupo.destroy()
+        self.deiconify()
 
     def fechar_player(self, janela_player):
         janela_player.destroy()
