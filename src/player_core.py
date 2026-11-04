@@ -78,18 +78,15 @@ class MeawZikCore:
         if not self.fila:
             return False
 
-        # Se repeat estiver ativo e for a última faixa, repete a mesma
         if self.is_repeat and self.indice_atual >= len(self.fila) - 1:
             return self.tocar_faixa(self.indice_atual, callback_tocando, callback_erro)
 
-        # Se shuffle estiver ativo, escolhe um índice aleatório diferente do atual
         if self.is_shuffle and len(self.fila) > 1:
             novo_indice = self.indice_atual
             while novo_indice == self.indice_atual:
                 novo_indice = random.randint(0, len(self.fila) - 1)
             return self.tocar_faixa(novo_indice, callback_tocando, callback_erro)
 
-        # Comportamento padrão linear
         if self.indice_atual + 1 < len(self.fila):
             return self.tocar_faixa(self.indice_atual + 1, callback_tocando, callback_erro)
         
@@ -112,6 +109,15 @@ class MeawZikCore:
             self.is_playing_state = True
             return True
 
+    def parar(self):
+        """Interrompe a reprodução de áudio atual no VLC"""
+        try:
+            if hasattr(self, 'player') and self.player:
+                self.player.stop()
+            self.is_playing_state = False
+        except Exception as e:
+            print(f"[!] Erro ao parar o player: {e}")
+
     def get_tempo_atual(self):
         try: return self.player.get_time()
         except: return 0
@@ -124,13 +130,10 @@ class MeawZikCore:
         try: self.player.set_time(int(posicao_ms))
         except: pass
 
-    def verificar_fim_musica(self):
-        if self.is_playing_state and self.player.get_state() == vlc.State.Ended:
-            return True
-        return False
+    def verificar_fim_musica_no_loop(self):
+        self.atualizar_icone_play_pause(False)
 
     def definir_volume(self, volume):
-        """Define o volume do player VLC (valor de 0 a 100)"""
         if self.player:
             vol_int = max(0, min(100, int(volume)))
             self.player.audio_set_volume(vol_int)
