@@ -1,144 +1,190 @@
 import os
 import sys
-import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
-# Importamos a classe do player
 from player_core import MeawZikCore
+from player_ui import PlayerUI
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
 def resource_path(relative_path):
     """ Obtém o caminho absoluto para os recursos no PyInstaller """
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
+    try: base_path = sys._MEIPASS
+    except Exception: base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-class MeawZikPlayerWindow(ctk.CTkToplevel):
-    """ Janela principal do Player (Modo Solo) """
+def aplicar_icone(janela):
+    """Carrega e define o ícone de forma compatível usando Pillow"""
+    for nome_arquivo in ["meawzik.ico", "meawzik.png"]:
+        caminho = resource_path(nome_arquivo)
+        if os.path.exists(caminho):
+            try:
+                img_pil = Image.open(caminho)
+                icone_tk = ImageTk.PhotoImage(img_pil)
+                janela.iconphoto(True, icone_tk)
+                janela._icone_ref = icone_tk 
+                break
+            except Exception as e:
+                print(f"[!] Erro ao carregar ícone {nome_arquivo}: {e}")
+
+def formatar_tempo(ms):
+    if ms < 0: return "00:00"
+    segundos = int(ms / 1000)
+    return f"{segundos // 60:02d}:{segundos % 60:02d}"
+
+class MeawZikPlayerWindow(PlayerUI):
     def __init__(self, parent):
-        super().__init__(parent)
-        self.title("Meaw-Zik - Sessão Solo")
-        self.geometry("600x450")
-        self.resizable(False, False)
-
-        # Configurar ícone
-        try:
-            caminho_ico = resource_path("meawzik.ico")
-            if os.path.exists(caminho_ico):
-                img_pil = Image.open(caminho_ico)
-                self.icone_app = ImageTk.PhotoImage(img_pil)
-                self.iconphoto(True, self.icone_app)
-        except Exception as e:
-            print(f"[!] Erro ao carregar ícone: {e}")
-
+        super().__init__(parent, controller=self)
+        self.title("MeawZik - Sessão Solo")
         self.core = MeawZikCore()
-
-        # --- LAYOUT DO PLAYER ---
-        self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.top_frame.pack(fill="x", padx=20, pady=15)
-
-        self.url_entry = ctk.CTkEntry(self.top_frame, placeholder_text="Cole o link ou digite o nome de uma música...", width=430)
-        self.url_entry.pack(side="left", padx=(0, 10))
-        self.url_entry.bind("<Return>", lambda event: self.ao_clicar_buscar())
-
-        self.load_btn = ctk.CTkButton(self.top_frame, text="Buscar / Carregar", width=120, command=self.ao_clicar_buscar)
-        self.load_btn.pack(side="right")
-
-        self.list_frame = ctk.CTkFrame(self)
-        self.list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 15))
-
-        self.playlist_box = tk.Listbox(
-            self.list_frame, 
-            bg="#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "#f0f0f0",
-            fg="white" if ctk.get_appearance_mode() == "Dark" else "black",
-            selectbackground="#1f6aa5",
-            borderwidth=0,
-            highlightthickness=0,
-            font=("Arial", 10)
-        )
-        self.playlist_box.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.status_label = ctk.CTkLabel(self, text="Status: Pronto", font=("Arial", 11), text_color="gray")
-        self.status_label.pack(padx=20, anchor="w")
-
-        self.control_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.control_frame.pack(fill="x", padx=20, pady=(5, 15))
-
-        self.play_pause_btn = ctk.CTkButton(self.control_frame, text="▶ Play", width=120, command=self.alternar_play_pause)
-        self.play_pause_btn.pack(side="left")
+        self.atualizando_slider = False
+        
+        aplicar_icone(self)
+        self.core.definir_volume(70)
+        self.iniciar_loop_monitorizacao()
 
     def ao_clicar_buscar(self):
         termo = self.url_entry.get().strip()
-        if not termo:
-            return
-        self.core.carregar_midia(termo, self.sucesso_carregamento, self.erro_carregamento)
+        if not termo: return
+        self.status_label.configure(text=f"Pesquisando por '{termo}'...")
+        self.core.pesquisar(termo, self.sucesso_pesquisa, self.erro_pesquisa)
 
-    def sucesso_carregamento(self, nova_fila):
-        self.after(0, lambda: self._atualizar_ui_pos_carga(nova_fila))
+    def sucesso_pesquisa(self, resultados):
+        self.after(0, lambda: self._atualizar_ui_pesquisa(resultados))
 
-    def _atualizar_ui_pos_carga(self, nova_fila):
-        self.playlist_box.delete(0, tk.END)
-        for i, faixa in enumerate(nova_fila):
-            self.playlist_box.insert(tk.END, f"{i+1}. {faixa['title']}")
+    def _atualizar_ui_pesquisa(self, resultados):
+        # Proteção robusta contra widgets destruídos ou fecho repentino de janela
+        try:
+            if self.winfo_exists() and hasattr(self, 'search_box') and self.search_box.winfo_exists():
+                self.search_box.delete(0, ctk.END)
+                for i, item in enumerate(resultados):
+                    self.search_box.insert(ctk.END, f"  {i+1}. {item['title']}")
+                self.status_label.configure(text=f"{len(resultados)} resultados encontrados.")
+        except Exception:
+            pass
 
-    def erro_carregamento(self, erro_msg):
-        pass
+    def erro_pesquisa(self, erro_msg):
+        try:
+            if self.winfo_exists():
+                self.after(0, lambda: self.status_label.configure(text=f"Erro: {erro_msg}"))
+        except Exception:
+            pass
+
+    def adicionar_selecionada_pesquisa(self):
+        selecao = self.search_box.curselection()
+        if selecao:
+            indice = selecao[0]
+            if indice < len(self.core.resultados_pesquisa):
+                faixa = self.core.resultados_pesquisa[indice]
+                self.core.adicionar_a_fila(faixa)
+                self.atualizar_ui_fila()
+                self.status_label.configure(text=f"'{faixa['title']}' adicionada à fila!")
+                if len(self.core.fila) == 1:
+                    self.core.tocar_faixa(0, self.ao_iniciar_tocar, self.erro_pesquisa)
+
+    def atualizar_ui_fila(self):
+        try:
+            if self.winfo_exists() and hasattr(self, 'playlist_box') and self.playlist_box.winfo_exists():
+                self.playlist_box.delete(0, ctk.END)
+                for i, faixa in enumerate(self.core.fila):
+                    prefixo = "▶ " if i == self.core.indice_atual else "  "
+                    self.playlist_box.insert(ctk.END, f"{prefixo}{i+1}. {faixa['title']}")
+                total = len(self.core.fila)
+                self.fila_titulo_label.configure(text=f"🎵 Fila de Reprodução ({total} {'item' if total == 1 else 'itens'})")
+        except Exception:
+            pass
+
+    def tocar_da_fila(self):
+        selecao = self.playlist_box.curselection()
+        if selecao:
+            self.core.tocar_faixa(selecao[0], self.ao_iniciar_tocar, self.erro_pesquisa)
+
+    def ao_iniciar_tocar(self, titulo, indice):
+        def atualizar():
+            try:
+                if self.winfo_exists():
+                    self.status_label.configure(text=f"Reproduzindo: {titulo}")
+                    self.play_pause_btn.configure(text="||")
+                    self.atualizar_ui_fila()
+                    self.playlist_box.selection_clear(0, ctk.END)
+                    self.playlist_box.selection_set(indice)
+                    self.playlist_box.activate(indice)
+            except Exception:
+                pass
+        self.after(0, atualizar)
+
+    def clicar_anterior(self): self.core.anterior(self.ao_iniciar_tocar, self.erro_pesquisa)
+    def clicar_proximo(self): self.core.proximo(self.ao_iniciar_tocar, self.erro_pesquisa)
 
     def alternar_play_pause(self):
-        if not self.core.fila:
-            return
+        if not self.core.fila: return
         tocando = self.core.alternar_play_pause()
-        if tocando:
-            self.play_pause_btn.configure(text="⏸ Pausar")
-        else:
-            self.play_pause_btn.configure(text="▶ Play")
+        self.play_pause_btn.configure(text="||" if tocando else ">")
 
+    def ao_ajustar_slider(self, valor):
+        if self.atualizando_slider: return
+        duracao = self.core.get_duracao()
+        if duracao > 0: self.core.definir_posicao((valor / 100.0) * duracao)
+
+    def ao_ajustar_volume(self, valor):
+        self.core.definir_volume(valor)
+
+    def iniciar_loop_monitorizacao(self):
+        def atualizar():
+            try:
+                if self.winfo_exists():
+                    if self.core.is_playing_state:
+                        duracao = self.core.get_duracao()
+                        atual = self.core.get_tempo_atual()
+                        if duracao > 0:
+                            self.tempo_atual_label.configure(text=formatar_tempo(atual))
+                            self.tempo_total_label.configure(text=formatar_tempo(duracao))
+                            self.atualizando_slider = True
+                            self.slider_progresso.set((atual / duracao) * 100)
+                            self.atualizando_slider = False
+                    if self.core.verificar_fim_musica():
+                        if not self.core.proximo(self.ao_iniciar_tocar, self.erro_pesquisa):
+                            self.play_pause_btn.configure(text=">")
+                    self.after(500, atualizar)
+            except Exception:
+                pass
+        self.after(500, atualizar)
+    def clicar_shuffle(self):
+        ativo = self.core.alternar_shuffle()
+        cor = "#4ea1f3" if ativo else self.btn_bg
+        self.btn_shuffle.configure(fg_color=cor)
+        self.status_label.configure(text=f"Modo Aleatório: {'Ativado' if ativo else 'Desativado'}")
+
+    def clicar_repeat(self):
+        ativo = self.core.alternar_repeat()
+        cor = "#4ea1f3" if ativo else self.btn_bg
+        self.btn_repeat.configure(fg_color=cor)
+        self.status_label.configure(text=f"Modo Repetição: {'Ativado' if ativo else 'Desativado'}")
 
 class MeawZikHome(ctk.CTk):
-    """ Ecrã Inicial / Menu Principal """
     def __init__(self):
         super().__init__()
-
-        self.title("Meaw-Zik - Início")
+        self.title("MeawZik - Início")
         self.geometry("400x300")
         self.resizable(False, False)
 
-        try:
-            caminho_ico = resource_path("meawzik.ico")
-            if os.path.exists(caminho_ico):
-                img_pil = Image.open(caminho_ico)
-                self.icone_app = ImageTk.PhotoImage(img_pil)
-                self.iconphoto(True, self.icone_app)
-        except Exception as e:
-            print(f"[!] Erro ao carregar ícone: {e}")
+        aplicar_icone(self)
 
-        # Elementos do Ecrã Inicial
-        self.label_titulo = ctk.CTkLabel(self, text="🎵 Meaw-Zik", font=("Arial", 24, "bold"))
+        self.label_titulo = ctk.CTkLabel(self, text="🎵 MeawZik", font=("Segoe UI", 24, "bold"))
         self.label_titulo.pack(pady=(40, 20))
 
-        self.label_sub = ctk.CTkLabel(self, text="Escolha o modo de reprodução", font=("Arial", 12), text_color="gray")
+        self.label_sub = ctk.CTkLabel(self, text="Escolha o modo de reprodução", font=("Segoe UI", 12), text_color="gray")
         self.label_sub.pack(pady=(5, 20))
 
-        # Botão Sessão Solo
-        self.btn_solo = ctk.CTkButton(self, text="🎧 Sessão Solo", width=220, height=40, font=("Arial", 14), command=self.abrir_solo)
+        self.btn_solo = ctk.CTkButton(self, text="🎧 Sessão Solo", width=220, height=40, font=("Segoe UI", 14), command=self.abrir_solo)
         self.btn_solo.pack(pady=10)
-
-        # Botão Sessão em Grupo (Placeholder)
-        self.btn_grupo = ctk.CTkButton(self, text="👥 Sessão em Grupo", width=220, height=40, font=("Arial", 14), fg_color="#4b4b4b", hover_color="#333333", command=self.abrir_grupo)
-        self.btn_grupo.pack(pady=10)
 
     def abrir_solo(self):
         self.withdraw()
         player_janela = MeawZikPlayerWindow(self)
         player_janela.protocol("WM_DELETE_WINDOW", lambda: self.fechar_player(player_janela))
-
-    def abrir_grupo(self):
-        print("[*] Funcionalidade de grupo em breve...")
 
     def fechar_player(self, janela_player):
         janela_player.destroy()
