@@ -203,10 +203,13 @@ class MeawZikPlayerWindow(PlayerUI):
                             self.atualizando_slider = True
                             self.slider_progresso.set((atual / duracao) * 100)
                             self.atualizando_slider = False
-                    if self.core.verificar_fim_musica():
-                        if not self.core.proximo(self.ao_iniciar_tocar, self.erro_pesquisa):
-                            self.atualizar_icone_play_pause(False) # Atualiza para ícone de Play quando a fila termina
-                    self.after(500, atualizar)
+                            
+                        if self.core.verificar_fim_musica():
+                            if not self.core.proximo(self.ao_iniciar_tocar, self.erro_pesquisa):
+                                self.atualizar_icone_play_pause(False)
+                    
+                    intervalo = 500 if self.core.is_playing_state else 2000
+                    self.after(intervalo, atualizar)
             except Exception:
                 pass
         self.after(500, atualizar)

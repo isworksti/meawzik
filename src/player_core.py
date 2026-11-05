@@ -60,7 +60,15 @@ class MeawZikCore:
 
     def _executar_streaming(self, video_url, titulo_fallback, callback_tocando, callback_erro):
         try:
-            ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'no_warnings': True}
+            # Adicionado user-agent para mitigar avisos/bloqueios do yt-dlp/YouTube
+            ydl_opts = {
+                'format': 'bestaudio/best', 
+                'quiet': True, 
+                'no_warnings': True,
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+            }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False)
                 audio_url = info['url']
@@ -130,8 +138,13 @@ class MeawZikCore:
         try: self.player.set_time(int(posicao_ms))
         except: pass
 
-    def verificar_fim_musica_no_loop(self):
-        self.atualizar_icone_play_pause(False)
+    def verificar_fim_musica(self):
+        # Verifica se o estado do VLC chegou ao fim (Ended) ou Parado sem intervenção manual
+        if self.is_playing_state:
+            estado = self.player.get_state()
+            if estado == vlc.State.Ended:
+                return True
+        return False
 
     def definir_volume(self, volume):
         if self.player:
