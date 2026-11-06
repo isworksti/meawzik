@@ -6,12 +6,24 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, QThread
 from player_ui import MeawZikPlayerWindow
 
+import sys
+import os
+
+def resource_path(relative_path):
+    """ Obtém o caminho absoluto para os recursos, compatível com o desenvolvimento e com o PyInstaller """
+    try:
+        # O PyInstaller cria uma pasta temporária e armazena o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 def main():
     app = QApplication(sys.argv)
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    caminho_splash = os.path.join(base_dir, "..", "app_meawzik.png")
-    caminho_sfx = os.path.join(base_dir, "..", "sfx", "meaw.mp3")
+    # Caminhos corrigidos usando resource_path
+    caminho_splash = resource_path("app_meawzik.png")
+    caminho_sfx = resource_path(os.path.join("sfx", "meaw.mp3"))
 
     splash = None
 
@@ -44,8 +56,8 @@ def main():
             sfx_player.set_media(media)
             sfx_player.play()
             
-            # Pausa breve (ex: 800ms) para o som ecoar inteiramente 
-            # enquanto o utilizador vê a splashart, antes de carregar a UI pesada
+            # Pausa breve (800ms) para o som ecoar inteiramente 
+            # enquanto o utilizador vê a splashart
             QThread.msleep(800)
         except Exception as e:
             print(f"Erro ao reproduzir som de abertura: {e}")

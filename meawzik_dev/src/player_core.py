@@ -7,7 +7,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 class SearchWorker(QThread):
     sucesso = pyqtSignal(list)
     erro = pyqtSignal(str)
-
+    
     def __init__(self, termo):
         super().__init__()
         self.termo = termo
@@ -24,11 +24,20 @@ class SearchWorker(QThread):
                     if entry:
                         e_url = entry.get('url')
                         e_title = entry.get('title', 'Desconhecido')
+                        
                         if not e_url and entry.get('id'):
                             e_id = entry.get('id')
                             e_url = f"https://www.youtube.com/watch?v={e_id}"
+                            
                         if e_url:
-                            resultados.append({'title': e_title, 'url': e_url})
+                            # --- CAPTURA DA DURAÇÃO NO SÍTIO CORRETO ---
+                            duracao_segundos = entry.get('duration', 0)
+                            resultados.append({
+                                'title': e_title, 
+                                'url': e_url,
+                                'duration': duracao_segundos # Guarda a duração em segundos
+                            })
+                            
             self.sucesso.emit(resultados)
         except Exception as e:
             self.erro.emit(str(e))
@@ -74,9 +83,9 @@ class MeawZikCore:
         # Otimizações de rede estáveis e compatíveis com o VLC
         vlc_args = [
             '--no-video', 
-            '--network-caching=3000',     # Aumenta o cache de rede para 3 segundos
+            '--network-caching=3000',      # Aumenta o cache de rede para 3 segundos
             '--live-caching=3000',
-            '--demux=any'                 # Garante flexibilidade no demuxer
+            '--demux=any'                   # Garante flexibilidade no demuxer
         ]
         self.vlc_instance = vlc.Instance(vlc_args)
         self.player = self.vlc_instance.media_player_new()
