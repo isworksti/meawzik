@@ -1,0 +1,27 @@
+{
+    "playlist_ativa_indice": 0,
+    "playlists": [
+        {
+            "nome": "TESTE",
+            "faixas": [
+                {
+                    "duration": 465,
+                    "title": "Highways Of Love",
+                    "url": "https://www.youtube.com/watch?v=_kMfKuXoX-U"
+                }
+            ]
+        },
+        {
+            "nome": "Playlist (2)",
+            "faixas": []
+        },
+        {
+            "nome": "Playlist (3)",
+            "faixas": []
+        },
+        {
+            "nome": "Playlist (4)",
+            "faixas": []
+        }
+    ]
+}

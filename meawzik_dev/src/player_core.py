@@ -1,3 +1,5 @@
+import json
+import os
 import random
 import vlc
 import yt_dlp
@@ -85,13 +87,12 @@ class MeawZikCore:
             '--no-video', 
             '--network-caching=3000',      # Aumenta o cache de rede para 3 segundos
             '--live-caching=3000',
-            '--demux=any'                   # Garante flexibilidade no demuxer
+            '--demux=any'                  # Garante flexibilidade no demuxer
         ]
         self.vlc_instance = vlc.Instance(vlc_args)
         self.player = self.vlc_instance.media_player_new()
         
         self.resultados_pesquisa = []
-        self.fila = []
         self.indice_atual = -1
         self.is_playing_state = False
         
@@ -99,8 +100,70 @@ class MeawZikCore:
         self.is_repeat = False
         self.cache_urls = {}
 
+        self.playlists = []  # Lista de dicionários: [{'nome': 'Playlist (1)', 'faixas': [...]}]
+        self.playlist_ativa_indice = 0
+        
+        # Carrega o histórico salvo em JSON e inicializa se estiver vazio
+        self.carregar_playlists_json()
+        self.inicializar_playlists_iniciais()
+
+    def guardar_playlists_json(self):
+        """Salva todas as playlists num ficheiro JSON local"""
+        try:
+            dados = {
+                'playlist_ativa_indice': self.playlist_ativa_indice,
+                'playlists': self.playlists
+            }
+            with open('playlists.json', 'w', encoding='utf-8') as f:
+                json.dump(dados, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Erro ao guardar playlists: {e}")
+
+    def carregar_playlists_json(self):
+        """Carrega as playlists do ficheiro JSON se ele existir"""
+        if os.path.exists('playlists.json'):
+            try:
+                with open('playlists.json', 'r', encoding='utf-8') as f:
+                    dados = json.load(f)
+                    self.playlists = dados.get('playlists', [])
+                    self.playlist_ativa_indice = dados.get('playlist_ativa_indice', 0)
+            except Exception as e:
+                print(f"Erro ao carregar playlists: {e}")
+
+    def inicializar_playlists_iniciais(self):
+        """Garante que ao abrir o programa exista pelo menos uma playlist padrão"""
+        if not self.playlists:
+            self.criar_nova_playlist()
+
+    def criar_nova_playlist(self):
+        """Cria uma nova playlist com o próximo número sequencial disponivel"""
+        numero = len(self.playlists) + 1
+        nome = f"Playlist ({numero})"
+        nova_pl = {
+            'nome': nome,
+            'faixas': []
+        }
+        self.playlists.append(nova_pl)
+        self.playlist_ativa_indice = len(self.playlists) - 1
+        self.guardar_playlists_json()
+        return nova_pl
+
+    @property
+    def fila(self):
+        """Atalho retrocompatível para a fila da playlist atualmente ativa"""
+        if not self.playlists:
+            self.criar_nova_playlist()
+        return self.playlists[self.playlist_ativa_indice]['faixas']
+
+    @fila.setter
+    def fila(self, nova_lista):
+        if self.playlists:
+            self.playlists[self.playlist_ativa_indice]['faixas'] = nova_lista
+            self.guardar_playlists_json()
+
     def adicionar_a_fila(self, faixa):
         self.fila.append(faixa)
+        self.guardar_playlists_json()
         return len(self.fila) - 1
 
     def remover_da_fila(self, indice):
@@ -111,6 +174,7 @@ class MeawZikCore:
                 self.indice_atual = -1
             elif indice < self.indice_atual:
                 self.indice_atual -= 1
+            self.guardar_playlists_json()
             return removida
         return None
 
@@ -162,3 +226,15 @@ class MeawZikCore:
     def alternar_repeat(self):
         self.is_repeat = not self.is_repeat
         return self.is_repeat
+
+    def selecionar_playlist(self, indice):
+        """Seleciona uma playlist existente pelo seu índice"""
+        if 0 <= indice < len(self.playlists):
+            self.playlist_ativa_indice = indice
+            self.guardar_playlists_json()
+            return True
+        return False
+
+    def obter_todas_playlists(self):
+        """Retorna o resumo de todas as playlists criadas"""
+        return [{'indice': i, 'nome': p['nome'], 'total_faixas': len(p['faixas'])} for i, p in enumerate(self.playlists)]
