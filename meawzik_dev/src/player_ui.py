@@ -1,12 +1,11 @@
 import os
-
 import sys
 import vlc
 import ctypes
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLineEdit, QPushButton, QScrollArea, QSlider, QLabel, QFrame
+    QLineEdit, QPushButton, QScrollArea, QSlider, QLabel, QFrame, QInputDialog
 )
 from PyQt6.QtGui import QIcon
 from player_core import MeawZikCore, SearchWorker, AudioWorker
@@ -30,12 +29,13 @@ class MeawZikPlayerWindow(QMainWindow):
         # Inicializa o Core
         self.core = MeawZikCore()
 
-        caminho_icone_janela = resource_path("logo-meawzik.ico") # ou o nome correto do ficheiro do logotipo
+        caminho_icone_janela = resource_path("logo-meawzik.ico")
         if os.path.exists(caminho_icone_janela):
             self.setWindowIcon(QIcon(caminho_icone_janela))
         
         # Estado do Tema (True = Escuro, False = Claro)
         self.is_dark_theme = True
+        self.a_ver_historico = False
         
         # Referências para workers ativos
         self.search_worker = None
@@ -49,42 +49,41 @@ class MeawZikPlayerWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        # 1. Barra de Pesquisa + Botão de Alternância de Tema ao lado
+        # 1. Barra de Pesquisa + Botão PLAYLISTS + Botão Pesquisar + Tema
         search_layout = QHBoxLayout()
         
         self.input_pesquisa = QLineEdit()
         self.input_pesquisa.setPlaceholderText("Digite o nome da música ou cole o link do YouTube...")
-        self.input_pesquisa.setFixedHeight(38) # <--- Define uma altura fixa consistente
+        self.input_pesquisa.setFixedHeight(38)
         self.input_pesquisa.returnPressed.connect(self.executar_pesquisa)
         
+        self.btn_playlists = QPushButton("PLAYLISTS")
+        self.btn_playlists.setFixedHeight(38)
+        self.btn_playlists.setToolTip("Ver histórico de playlists criadas")
+        self.btn_playlists.clicked.connect(self.alternar_visao_playlists)
+
         self.btn_pesquisar = QPushButton("Pesquisar")
-        self.btn_pesquisar.setFixedHeight(38) # <--- Mesma altura do input para ficarem nivelados
+        self.btn_pesquisar.setFixedHeight(38)
         self.btn_pesquisar.clicked.connect(self.executar_pesquisa)
         
         # Botão de Tema (Alternar Dark/Light)
-        self.btn_tema = QPushButton("🌙")
+        self.btn_tema = QPushButton()
         self.btn_tema.setToolTip("Alternar Tema Claro/Escuro")
-        self.btn_tema.setFixedSize(40, 38) # <--- Mesma altura também para manter a harmonia
+        self.btn_tema.setFixedSize(40, 38)
         self.btn_tema.clicked.connect(self.alternar_tema)
         
         search_layout.addWidget(self.input_pesquisa)
+        search_layout.addWidget(self.btn_playlists)
         search_layout.addWidget(self.btn_pesquisar)
         search_layout.addWidget(self.btn_tema)
         main_layout.addLayout(search_layout)
 
-        # 2. Área Central (Resultados da Busca e Fila de Reprodução em QScrollArea)
+        # 2. Área Central (Resultados da Busca e Fila de Reprodução)
         content_layout = QHBoxLayout()
 
-        # ScrollArea para os Resultados da Pesquisa com distribuição uniforme
+        # ScrollArea para os Resultados da Pesquisa
         self.scroll_resultados = QScrollArea()
         self.scroll_resultados.setWidgetResizable(True)
-        self.scroll_resultados.setStyleSheet("""
-            QScrollArea { 
-                background-color: #181825; 
-                border: 1px solid #313244; 
-                border-radius: 6px; 
-            }
-        """)
         
         self.container_resultados = QWidget()
         self.container_resultados.setStyleSheet("background: transparent;")
@@ -92,19 +91,11 @@ class MeawZikPlayerWindow(QMainWindow):
         self.layout_container_resultados.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.layout_container_resultados.setContentsMargins(4, 4, 4, 4)
         self.layout_container_resultados.setSpacing(4)
-        
         self.scroll_resultados.setWidget(self.container_resultados)
         
-        # Fila de reprodução em QScrollArea com células compactas
+        # Fila de reprodução em QScrollArea
         self.scroll_fila = QScrollArea()
         self.scroll_fila.setWidgetResizable(True)
-        self.scroll_fila.setStyleSheet("""
-            QScrollArea { 
-                background-color: #181825; 
-                border: 1px solid #313244; 
-                border-radius: 6px; 
-            }
-        """)
         
         self.container_fila = QWidget()
         self.container_fila.setStyleSheet("background: transparent;")
@@ -112,14 +103,33 @@ class MeawZikPlayerWindow(QMainWindow):
         self.layout_container_fila.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.layout_container_fila.setContentsMargins(4, 4, 4, 4)
         self.layout_container_fila.setSpacing(4)
-        
         self.scroll_fila.setWidget(self.container_fila)
 
+        # Coluna da Fila com Cabeçalho de Playlist e Botão de Nova Playlist (+)
+        coluna_fila_layout = QVBoxLayout()
+        
+        topo_fila_layout = QHBoxLayout()
+        self.lbl_titulo_playlist = QLabel("PLAYLIST \"X\"")
+        self.lbl_titulo_playlist.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_titulo_playlist.setToolTip("Duplo clique para renomear a playlist")
+        self.lbl_titulo_playlist.mouseDoubleClickEvent = self.ativar_edicao_nome_playlist
+        
+        self.btn_nova_playlist = QPushButton("+")
+        self.btn_nova_playlist.setFixedSize(28, 28)
+        self.btn_nova_playlist.setToolTip("Criar nova playlist")
+        self.btn_nova_playlist.clicked.connect(self.acao_criar_nova_playlist)
+        
+        topo_fila_layout.addWidget(self.lbl_titulo_playlist, stretch=1)
+        topo_fila_layout.addWidget(self.btn_nova_playlist, stretch=0)
+        
+        coluna_fila_layout.addLayout(topo_fila_layout)
+        coluna_fila_layout.addWidget(self.scroll_fila)
+
         content_layout.addWidget(self.scroll_resultados, stretch=1)
-        content_layout.addWidget(self.scroll_fila, stretch=1)
+        content_layout.addLayout(coluna_fila_layout, stretch=1)
         main_layout.addLayout(content_layout)
 
-        # 3. Painel de Controlo de Áudio (Player com Ícones Personalizados)
+        # 3. Painel de Controlo de Áudio
         player_frame = QFrame()
         player_layout = QVBoxLayout(player_frame)
 
@@ -135,20 +145,17 @@ class MeawZikPlayerWindow(QMainWindow):
         progress_layout.addWidget(self.lbl_tempo_total)
         player_layout.addLayout(progress_layout)
 
-        # Configuração do QTimer para atualizar a barra de progresso fluidamente
         self.timer_progresso = QTimer(self)
-        self.timer_progresso.setInterval(1000)  # Atualiza a cada 500ms
+        self.timer_progresso.setInterval(1000)
         self.timer_progresso.timeout.connect(self.atualizar_barra_progresso)
         self.slider_progresso.sliderReleased.connect(self.ao_soltar_slider)
 
         # Botões de Controlo do Player
         controls_layout = QHBoxLayout()
         
-        # 1. Bloco esquerdo de balanceamento
         left_balancer = QWidget()
         left_balancer.setFixedWidth(130)
         
-        # 2. Container central para os botões multimédia
         center_widget = QWidget()
         center_layout = QHBoxLayout(center_widget)
         center_layout.setContentsMargins(0, 0, 0, 0)
@@ -164,21 +171,18 @@ class MeawZikPlayerWindow(QMainWindow):
             btn.setFixedSize(38, 38)
             center_layout.addWidget(btn)
 
-        # 3. Slider de volume reduzido a 50% e posicionado à direita
         self.slider_volume = QSlider(Qt.Orientation.Horizontal)
         self.slider_volume.setRange(0, 100)
         self.slider_volume.setValue(70)
         self.slider_volume.setMaximumWidth(120)
         self.slider_volume.valueChanged.connect(self.ajustar_volume)
 
-        # Ligações de eventos dos botões
         self.btn_play.clicked.connect(self.alternar_play_pause)
         self.btn_next.clicked.connect(self.proxima_faixa)
         self.btn_prev.clicked.connect(self.faixa_anterior)
         self.btn_repeat.clicked.connect(self.alternar_repeticao)
         self.btn_shuffle.clicked.connect(self.alternar_aleatorio)
 
-        # 4. Bloco direito (Volume)
         right_widget = QWidget()
         right_layout = QHBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -186,7 +190,6 @@ class MeawZikPlayerWindow(QMainWindow):
         right_layout.addWidget(self.slider_volume)
         right_widget.setFixedWidth(130)
 
-        # Montagem final do layout equilibrado
         controls_layout.addWidget(left_balancer)
         controls_layout.addStretch(1)
         controls_layout.addWidget(center_widget)
@@ -196,11 +199,11 @@ class MeawZikPlayerWindow(QMainWindow):
         player_layout.addLayout(controls_layout)
         main_layout.addWidget(player_frame)
 
-        # Barra de Status
         self.lbl_status = QLabel("Pronto.")
         main_layout.addWidget(self.lbl_status)
 
         self.atualizar_icones_player()
+        self.atualizar_ui_fila()
 
     def formatar_tempo(self, ms):
         """Converte milissegundos para o formato MM:SS"""
@@ -221,7 +224,6 @@ class MeawZikPlayerWindow(QMainWindow):
             return "00:00"
 
     def selecionar_e_tocar_fila(self, indice):
-        """Seleciona e reproduz a faixa clicada diretamente na fila"""
         self.tocar_indice(indice)
 
     def atualizar_barra_progresso(self):
@@ -238,7 +240,6 @@ class MeawZikPlayerWindow(QMainWindow):
                 self.lbl_tempo_atual.setText(self.formatar_tempo(tempo_atual))
                 self.lbl_tempo_total.setText(self.formatar_tempo(duracao_total))
                 
-            # Detetar se a música chegou ao fim de forma robusta
             estado_vlc = self.core.player.get_state()
             if estado_vlc == vlc.State.Ended or (duracao_total > 0 and tempo_atual >= duracao_total - 1000):
                 self.timer_progresso.stop()
@@ -249,10 +250,101 @@ class MeawZikPlayerWindow(QMainWindow):
                     self.atualizar_icones_player()
 
     def ao_soltar_slider(self):
-        """Permite saltar para o ponto específico da música ao arrastar o slider (Seek)"""
         if hasattr(self.core, 'player'):
             nova_posicao = self.slider_progresso.value()
             self.core.definir_posicao(nova_posicao)
+
+    def acao_criar_nova_playlist(self):
+        nova_pl = self.core.criar_nova_playlist()
+        self.a_ver_historico = False
+        self.btn_playlists.setText("PLAYLISTS")
+        self.atualizar_ui_fila()
+        self.lbl_status.setText(f"Criada e selecionada: {nova_pl['nome']}")
+
+    def ativar_edicao_nome_playlist(self, event):
+        """Permite editar o nome da playlist atual ao dar duplo clique no título"""
+        if not self.core.playlists:
+            return
+            
+        playlist_atual = self.core.playlists[self.core.playlist_ativa_indice]
+        nome_atual = playlist_atual['nome']
+        
+        novo_nome, ok = QInputDialog.getText(
+            self, 
+            "Renomear Playlist", 
+            "Introduza o novo nome da playlist:", 
+            QLineEdit.EchoMode.Normal, 
+            nome_atual
+        )
+        
+        if ok and novo_nome.strip():
+            novo_nome_limpo = novo_nome.strip()
+            self.core.playlists[self.core.playlist_ativa_indice]['nome'] = novo_nome_limpo
+            self.core.guardar_playlists_json()
+            
+            self.atualizar_ui_fila()
+            self.lbl_status.setText(f"Playlist renomeada para: {novo_nome_limpo}")
+
+    def alternar_visao_playlists(self):
+        """Alterna entre ver a fila da playlist atual e o histórico de playlists gravadas"""
+        self.a_ver_historico = not self.a_ver_historico
+        if self.a_ver_historico:
+            self.btn_playlists.setText("⚡ VER FILA")
+            self.exibir_historico_playlists()
+        else:
+            self.btn_playlists.setText("PLAYLISTS")
+            self.atualizar_ui_fila()
+
+    def exibir_historico_playlists(self):
+        """Renderiza o histórico de playlists na área da direita"""
+        while self.layout_container_fila.count():
+            item = self.layout_container_fila.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if hasattr(self, 'lbl_titulo_playlist'):
+            self.lbl_titulo_playlist.setText("HISTÓRICO DE PLAYLISTS")
+            cor_titulo = "#ffffff" if self.is_dark_theme else "#000000"
+            self.lbl_titulo_playlist.setStyleSheet(f"font-weight: bold; color: {cor_titulo}; font-size: 12px; background: transparent;")
+
+        playlists = self.core.obter_todas_playlists()
+        
+        for p in playlists:
+            linha_widget = QWidget()
+            linha_layout = QHBoxLayout(linha_widget)
+            linha_layout.setContentsMargins(8, 6, 8, 6)
+
+            is_ativa = (p['indice'] == self.core.playlist_ativa_indice)
+            prefixo = "▶ [Ativa] " if is_ativa else ""
+            
+            lbl_nome = QLabel(f"{prefixo}{p['nome']} ({p['total_faixas']} faixas)")
+            lbl_nome.setStyleSheet("font-weight: bold; background: transparent; border: none; font-size: 12px;")
+            
+            linha_layout.addWidget(lbl_nome, stretch=1)
+
+            bg_cor = "#313244" if is_ativa and self.is_dark_theme else ("#e2e2e6" if is_ativa else "transparent")
+            hover_cor = "#45475a" if self.is_dark_theme else "#eaeaea"
+            
+            linha_widget.setStyleSheet(f"""
+                QWidget {{
+                    background-color: {bg_cor};
+                    border-radius: 4px;
+                }}
+                QWidget:hover {{
+                    background-color: {hover_cor};
+                }}
+            """)
+
+            linha_widget.mousePressEvent = lambda event, idx=p['indice']: self.selecionar_playlist_historico(idx)
+            self.layout_container_fila.addWidget(linha_widget)
+
+    def selecionar_playlist_historico(self, indice):
+        self.core.selecionar_playlist(indice)
+        self.a_ver_historico = False
+        self.btn_playlists.setText("PLAYLISTS")
+        self.atualizar_ui_fila()
+        pl_nome = self.core.playlists[indice]['nome']
+        self.lbl_status.setText(f"Playlist selecionada: {pl_nome}")
 
     def obter_caminho_icone(self, nome_base):
         """Retorna o caminho correto para o ícone .ico utilizando o resource_path"""
@@ -261,21 +353,23 @@ class MeawZikPlayerWindow(QMainWindow):
             if os.path.exists(caminho):
                 return caminho
                 
-        # Se for o ícone de tema específico, procura na pasta respetiva ou na raiz de icons
-        if nome_base in ["lua_dark", "sol_light"]:
-            pasta_tema = "dark_theme" if self.is_dark_theme else "light_theme"
-            caminho = resource_path(os.path.join("icons", pasta_tema, f"{nome_base}.ico"))
-            if os.path.exists(caminho):
-                return caminho
+        sufixo = "dark" if self.is_dark_theme else "light"
+        
+        if nome_base == "adicionar":
+            nome_arquivo = f"adicionar_{sufixo}.ico"
+        elif nome_base in ["lua_dark", "sol_light"]:
+            nome_arquivo = f"{nome_base}.ico"
+        else:
+            nome_arquivo = f"{nome_base}.ico"
 
         pasta_tema = "dark_theme" if self.is_dark_theme else "light_theme"
-        caminho = resource_path(os.path.join("icons", pasta_tema, f"{nome_base}.ico"))
+        caminho = resource_path(os.path.join("icons", pasta_tema, nome_arquivo))
         if os.path.exists(caminho):
             return caminho
+            
         return ""
 
     def atualizar_icones_player(self):
-        """Atualiza os ícones dos botões do player e do tema com base nos ficheiros .ico"""
         sufixo = "dark" if self.is_dark_theme else "light"
         
         icon_play = self.obter_caminho_icone(f"pause_{sufixo}" if self.core.is_playing_state else f"play_{sufixo}")
@@ -283,61 +377,68 @@ class MeawZikPlayerWindow(QMainWindow):
         icon_avancar = self.obter_caminho_icone(f"avançar_{sufixo}")
         icon_repetir = self.obter_caminho_icone(f"repetir_{sufixo}")
         icon_aleatorio = self.obter_caminho_icone(f"aleatório_{sufixo}")
+        
+        icon_adicionar = self.obter_caminho_icone("adicionar")
 
         if icon_play: self.btn_play.setIcon(QIcon(icon_play))
         if icon_voltar: self.btn_prev.setIcon(QIcon(icon_voltar))
         if icon_avancar: self.btn_next.setIcon(QIcon(icon_avancar))
         if icon_repetir: self.btn_repeat.setIcon(QIcon(icon_repetir))
         if icon_aleatorio: self.btn_shuffle.setIcon(QIcon(icon_aleatorio))
+        
+        if icon_adicionar and hasattr(self, 'btn_nova_playlist'):
+            self.btn_nova_playlist.setIcon(QIcon(icon_adicionar))
+            self.btn_nova_playlist.setText("")  
+        elif hasattr(self, 'btn_nova_playlist'):
+            self.btn_nova_playlist.setText("+") 
 
-        # --- ATUALIZAÇÃO DO BOTÃO DE TEMA COM OS NOVOS ÍCONES ---
         nome_icone_tema = "lua_dark" if self.is_dark_theme else "sol_light"
         caminho_tema = self.obter_caminho_icone(nome_icone_tema)
         if caminho_tema:
             self.btn_tema.setIcon(QIcon(caminho_tema))
-            self.btn_tema.setText("") # Remove o emoji de texto antigo se houver
+            self.btn_tema.setText("")
         else:
-            # Fallback de texto caso o ícone não seja encontrado
             self.btn_tema.setText("🌙" if self.is_dark_theme else "☀️")
 
     def alternar_tema(self):
         self.is_dark_theme = not self.is_dark_theme
-        self.btn_tema.setText("🌙" if self.is_dark_theme else "☀️")
         self.aplicar_estilo_tema()
         self.atualizar_icones_player()
         self.atualizar_ui_fila()
 
     def aplicar_estilo_tema(self):
         if self.is_dark_theme:
-            # Cores para o tema escuro
             bg_scroll = "#181825"
             border_scroll = "#313244"
+            cor_titulo = "#ffffff"  # Branco para o tema escuro
             
             self.setStyleSheet("""
                 QMainWindow, QWidget { background-color: #1e1e2e; color: #cdd6f4; font-family: 'Segoe UI', sans-serif; }
                 QLineEdit { background-color: #313244; border: 1px solid #45475a; border-radius: 6px; padding: 8px; color: #cdd6f4; }
-                QPushButton { background-color: #89b4fa; color: #11111b; font-weight: bold; border-radius: 6px; padding: 8px 12px; border: none; }
+                QPushButton { background-color: #89b4fa; color: #ffffff; font-weight: bold; border-radius: 6px; padding: 8px 12px; border: none; }
                 QPushButton:hover { background-color: #b4befe; }
                 QScrollArea { background-color: #181825; border: 1px solid #313244; border-radius: 6px; }
                 QSlider::groove:horizontal { height: 6px; background: #45475a; border-radius: 3px; }
                 QSlider::handle:horizontal { background: #89b4fa; width: 14px; margin: -4px 0; border-radius: 7px; }
             """)
         else:
-            # Cores para o tema claro
-            bg_scroll = "#ffffff"
-            border_scroll = "#d2d2d7"
+            bg_scroll = "#e8e8ed"
+            border_scroll = "#c5c5cb"
+            cor_titulo = "#000000"  # Preto para o tema claro
             
             self.setStyleSheet("""
-                QMainWindow, QWidget { background-color: #f5f5f7; color: #1d1d1f; font-family: 'Segoe UI', sans-serif; }
-                QLineEdit { background-color: #ffffff; border: 1px solid #d2d2d7; border-radius: 6px; padding: 8px; color: #1d1d1f; }
-                QPushButton { background-color: #0071e3; color: #ffffff; font-weight: bold; border-radius: 6px; padding: 8px 12px; border: none; }
+                QMainWindow, QWidget { background-color: #f2f2f7; color: #1d1d1f; font-family: 'Segoe UI', sans-serif; }
+                QLineEdit { background-color: #ffffff; border: 1px solid #c5c5cb; border-radius: 6px; padding: 8px; color: #1d1d1f; }
+                QPushButton { background-color: #0071e3; color: #000000; font-weight: bold; border-radius: 6px; padding: 8px 12px; border: none; }
                 QPushButton:hover { background-color: #0077ed; }
-                QScrollArea { background-color: #ffffff; border: 1px solid #d2d2d7; border-radius: 6px; }
-                QSlider::groove:horizontal { height: 6px; background: #d2d2d7; border-radius: 3px; }
+                QScrollArea { background-color: #e8e8ed; border: 1px solid #c5c5cb; border-radius: 6px; }
+                QSlider::groove:horizontal { height: 6px; background: #c5c5cb; border-radius: 3px; }
                 QSlider::handle:horizontal { background: #0071e3; width: 14px; margin: -4px 0; border-radius: 7px; }
             """)
 
-        # Aplica dinamicamente nas ScrollAreas de pesquisa e fila
+        if hasattr(self, 'lbl_titulo_playlist'):
+            self.lbl_titulo_playlist.setStyleSheet(f"font-weight: bold; color: {cor_titulo}; font-size: 12px; background: transparent;")
+
         estilo_scroll = f"QScrollArea {{ background-color: {bg_scroll}; border: 1px solid {border_scroll}; border-radius: 6px; }}"
         if hasattr(self, 'scroll_resultados'):
             self.scroll_resultados.setStyleSheet(estilo_scroll)
@@ -398,7 +499,7 @@ class MeawZikPlayerWindow(QMainWindow):
             self.layout_container_resultados.addWidget(linha_widget, stretch=1)
             
         self.lbl_status.setText(f"{len(self.core.resultados_pesquisa)} resultados encontrados.")
-        
+
     def adicionar_indice_a_fila(self, indice):
         if 0 <= indice < len(self.core.resultados_pesquisa):
             item = self.core.resultados_pesquisa[indice]
@@ -431,13 +532,11 @@ class MeawZikPlayerWindow(QMainWindow):
             self.lbl_status.setText(f"Reproduzindo: {titulo}")
             self.atualizar_ui_fila()
             
-            # Inicia o temporizador da barra de progresso
             self.timer_progresso.start()
         except Exception as e:
             self.lbl_status.setText(f"Erro ao reproduzir no VLC: {e}")
 
     def formatar_tempo_total(self, segundos):
-        """Converte segundos totais para um formato legível (ex: 1h 25m ou 14 min)"""
         try:
             segundos = int(segundos)
             horas = segundos // 3600
@@ -450,13 +549,20 @@ class MeawZikPlayerWindow(QMainWindow):
             return "0 min"
 
     def atualizar_ui_fila(self):
-        # Limpa o layout atual da fila
+        if getattr(self, 'a_ver_historico', False):
+            return
+
         while self.layout_container_fila.count():
             item = self.layout_container_fila.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        # --- CABEÇALHO COM O TOTAL DE FAIXAS E DURAÇÃO DA FILA ---
+        if hasattr(self, 'lbl_titulo_playlist') and self.core.playlists:
+            pl_ativa = self.core.playlists[self.core.playlist_ativa_indice]
+            self.lbl_titulo_playlist.setText(pl_ativa['nome'].upper())
+            cor_titulo = "#ffffff" if self.is_dark_theme else "#000000"
+            self.lbl_titulo_playlist.setStyleSheet(f"font-weight: bold; color: {cor_titulo}; font-size: 12px; background: transparent;")
+
         if self.core.fila:
             total_segundos = sum(faixa.get('duration', 0) for faixa in self.core.fila)
             texto_total = self.formatar_tempo_total(total_segundos)
@@ -474,7 +580,6 @@ class MeawZikPlayerWindow(QMainWindow):
             """)
             self.layout_container_fila.addWidget(lbl_info)
 
-        # --- RENDERIZAÇÃO DAS FAIXAS ---
         for index, faixa in enumerate(self.core.fila):
             linha_widget = QWidget()
             linha_layout = QHBoxLayout(linha_widget)
@@ -493,19 +598,16 @@ class MeawZikPlayerWindow(QMainWindow):
             lbl_duracao = QLabel(texto_duracao)
             lbl_duracao.setStyleSheet("color: #a6adc8; font-size: 11px;")
             
-            # Botão de remover item da fila (pequeno e alinhado à direita)
             btn_remover = QPushButton()
             btn_remover.setFixedSize(24, 24)
             btn_remover.setToolTip("Remover da fila")
             
-            # Carrega o ícone de cancelar
             caminho_icone_cancelar = self.obter_caminho_icone("cancelar")
             if caminho_icone_cancelar:
                 btn_remover.setIcon(QIcon(caminho_icone_cancelar))
             else:
-                btn_remover.setText("✕") # Fallback caso o ícone não seja encontrado
+                btn_remover.setText("✕")
                 
-            # Estilo discreto para o botão de remover na linha
             btn_remover.setStyleSheet("""
                 QPushButton {
                     background-color: transparent;
@@ -517,10 +619,8 @@ class MeawZikPlayerWindow(QMainWindow):
                 }
             """)
             
-            # Ação de clique do botão de remover
             btn_remover.clicked.connect(lambda checked, idx=index: self.remover_item_fila(idx))
 
-            # Adiciona os elementos ao layout horizontal da linha
             linha_layout.addWidget(lbl_titulo, stretch=1)
             linha_layout.addWidget(lbl_duracao, stretch=0)
             linha_layout.addWidget(btn_remover, stretch=0)
@@ -543,7 +643,6 @@ class MeawZikPlayerWindow(QMainWindow):
                 }}
             """)
 
-            # Clique duplo ou clique simples na linha para tocar
             linha_widget.mousePressEvent = lambda event, idx=index: self.selecionar_e_tocar_fila(idx)
             self.layout_container_fila.addWidget(linha_widget)
 
@@ -563,7 +662,6 @@ class MeawZikPlayerWindow(QMainWindow):
         tocando = self.core.alternar_play_pause()
         self.atualizar_icones_player()
         
-        # Controla o timer dependendo se está a tocar ou pausado
         if tocando:
             self.timer_progresso.start()
         else:
