@@ -5,7 +5,7 @@ import ctypes
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLineEdit, QPushButton, QScrollArea, QSlider, QLabel, QFrame, QInputDialog
+    QLineEdit, QPushButton, QScrollArea, QSlider, QLabel, QFrame, QInputDialog, QMessageBox
 )
 from PyQt6.QtGui import QIcon
 from player_core import MeawZikCore, SearchWorker, AudioWorker
@@ -59,6 +59,7 @@ class MeawZikPlayerWindow(QMainWindow):
         
         self.btn_playlists = QPushButton("PLAYLISTS")
         self.btn_playlists.setFixedHeight(38)
+        self.btn_playlists.setFixedWidth(90)
         self.btn_playlists.setToolTip("Ver histórico de playlists criadas")
         self.btn_playlists.clicked.connect(self.alternar_visao_playlists)
 
@@ -240,11 +241,58 @@ class MeawZikPlayerWindow(QMainWindow):
                 self.lbl_tempo_atual.setText(self.formatar_tempo(tempo_atual))
                 self.lbl_tempo_total.setText(self.formatar_tempo(duracao_total))
                 
+                volume_atual_usuario = self.slider_volume.value()
+                tempo_restante = duracao_total - tempo_atual
+
+                # 1. FADE-IN INICIAL (Primeiros 10 segundos da música)
+                if tempo_atual < 10000:
+                    fator = tempo_atual / 10000.0
+                    vol_fade = int(volume_atual_usuario * fator)
+                    self.core.definir_volume_temporario(vol_fade)
+                    
+                # 2. DISPARAR O CROSSFADE REAL (Aos exatos 10 segundos para o fim)
+                elif 10000 >= tempo_restante > 0 and self.core.indice_atual + 1 < len(self.core.fila):
+                    proxima_faixa = self.core.fila[self.core.indice_atual + 1]
+                    
+                    # Se o player secundário ainda não estiver a tocar a próxima faixa, disparamos via worker
+                    if not hasattr(self, 'crossfade_em_andamento') or not self.crossfade_em_andamento:
+                        self.crossfade_em_andamento = True
+                        # Busca o link da próxima faixa e inicia no player secundário
+                        self.audio_worker_cross = AudioWorker(proxima_faixa['url'], proxima_faixa['title'], self.core.cache_urls)
+                        self.audio_worker_cross.sucesso.connect(lambda url: self.core.iniciar_crossfade_secundario(url))
+                        self.audio_worker_cross.start()
+
+                    # Fator de progresso dos últimos 10 segundos (de 1.0 descendo até 0.0)
+                    fator_fade_out = tempo_restante / 10000.0
+                    fator_fade_in = 1.0 - fator_fade_out
+
+                    # Música atual desce o volume (Fade-Out)
+                    vol_atual = int(volume_atual_usuario * fator_fade_out)
+                    self.core.definir_volume_temporario(vol_atual)
+
+                    # Próxima música sobe o volume em simultâneo (Fade-In)
+                    vol_proxima = int(volume_atual_usuario * fator_fade_in)
+                    self.core.definir_volume_secundario(vol_proxima)
+                else:
+                    self.core.definir_volume_temporario(volume_atual_usuario)
+                
+            # Fim da faixa atual -> Conclui a transição de vez
             estado_vlc = self.core.player.get_state()
             if estado_vlc == vlc.State.Ended or (duracao_total > 0 and tempo_atual >= duracao_total - 1000):
                 self.timer_progresso.stop()
+                
+                # Reseta a flag de crossfade
+                if hasattr(self, 'crossfade_em_andamento'):
+                    self.crossfade_em_andamento = False
+
                 if self.core.indice_atual + 1 < len(self.core.fila):
-                    self.proxima_faixa()
+                    # Promove o player secundário a principal e avança o índice interno
+                    self.core.concluir_crossfade_troca()
+                    self.core.indice_atual += 1
+                    self.core.definir_volume(self.slider_volume.value())
+                    self.atualizar_ui_fila()
+                    self.lbl_status.setText(f"Reproduzindo: {self.core.fila[self.core.indice_atual]['title']}")
+                    self.timer_progresso.start()
                 else:
                     self.core.parar()
                     self.atualizar_icones_player()
@@ -289,21 +337,22 @@ class MeawZikPlayerWindow(QMainWindow):
         """Alterna entre ver a fila da playlist atual e o histórico de playlists gravadas"""
         self.a_ver_historico = not self.a_ver_historico
         if self.a_ver_historico:
-            self.btn_playlists.setText("⚡ VER FILA")
+            self.btn_playlists.setText("FILA")
             self.exibir_historico_playlists()
         else:
             self.btn_playlists.setText("PLAYLISTS")
+            self.lbl_titulo_playlist.setText("PLAYLISTS")
             self.atualizar_ui_fila()
 
     def exibir_historico_playlists(self):
-        """Renderiza o histórico de playlists na área da direita"""
+        """Renderiza o histórico de playlists na área da direita com indicador visual e contraste ajustado"""
         while self.layout_container_fila.count():
             item = self.layout_container_fila.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
         if hasattr(self, 'lbl_titulo_playlist'):
-            self.lbl_titulo_playlist.setText("HISTÓRICO DE PLAYLISTS")
+            self.lbl_titulo_playlist.setText("PLAYLISTS")
             cor_titulo = "#ffffff" if self.is_dark_theme else "#000000"
             self.lbl_titulo_playlist.setStyleSheet(f"font-weight: bold; color: {cor_titulo}; font-size: 12px; background: transparent;")
 
@@ -315,20 +364,57 @@ class MeawZikPlayerWindow(QMainWindow):
             linha_layout.setContentsMargins(8, 6, 8, 6)
 
             is_ativa = (p['indice'] == self.core.playlist_ativa_indice)
-            prefixo = "▶ [Ativa] " if is_ativa else ""
             
-            lbl_nome = QLabel(f"{prefixo}{p['nome']} ({p['total_faixas']} faixas)")
-            lbl_nome.setStyleSheet("font-weight: bold; background: transparent; border: none; font-size: 12px;")
+            # ---> CORREÇÃO DO SINGULAR/PLURAL AQUI <---
+            total_f = p['total_faixas']
+            texto_faixas = "1 faixa" if total_f == 1 else f"{total_f} faixas"
             
-            linha_layout.addWidget(lbl_nome, stretch=1)
+            lbl_nome = QLabel(f"{p['nome']} ({texto_faixas})")
+            # ------------------------------------------
+            
+            # Ajuste de cores e opacidade/contraste dependendo se está ativa ou inativa
+            if is_ativa:
+                cor_texto_item = "#ffffff" if self.is_dark_theme else "#000000"
+                lbl_nome.setStyleSheet(f"font-weight: bold; color: {cor_texto_item}; background: transparent; border: none; font-size: 12px;")
+            else:
+                cor_inativa = "#a6adc8" if self.is_dark_theme else "#6e6e73"
+                lbl_nome.setStyleSheet(f"font-weight: normal; color: {cor_inativa}; background: transparent; border: none; font-size: 12px;")
 
-            bg_cor = "#313244" if is_ativa and self.is_dark_theme else ("#e2e2e6" if is_ativa else "transparent")
-            hover_cor = "#45475a" if self.is_dark_theme else "#eaeaea"
+            # Botão de excluir
+            btn_excluir_hist = QPushButton()
+            btn_excluir_hist.setFixedSize(24, 24)
+            btn_excluir_hist.setToolTip("Excluir esta playlist")
             
+            caminho_icone_cancelar = self.obter_caminho_icone("cancelar")
+            if caminho_icone_cancelar:
+                btn_excluir_hist.setIcon(QIcon(caminho_icone_cancelar))
+            else:
+                btn_excluir_hist.setText("✕")
+                
+            btn_excluir_hist.setStyleSheet("""
+                QPushButton { background-color: transparent; border: none; border-radius: 4px; }
+                QPushButton:hover { background-color: rgba(255, 0, 0, 0.2); }
+            """)
+            btn_excluir_hist.clicked.connect(lambda checked, idx=p['indice']: self.solicitar_exclusao_playlist(idx))
+
+            linha_layout.addWidget(lbl_nome, stretch=1)
+            linha_layout.addWidget(btn_excluir_hist, stretch=0)
+
+            # Estilização do fundo e do marcador visual (borda lateral esquerda destacada na ativa)
+            if self.is_dark_theme:
+                bg_cor = "#313244" if is_ativa else "transparent"
+                hover_cor = "#45475a"
+                borda_lateral = "border-left: 4px solid #89b4fa;" if is_ativa else "border-left: 4px solid transparent;"
+            else:
+                bg_cor = "#e2e2e6" if is_ativa else "transparent"
+                hover_cor = "#eaeaea"
+                borda_lateral = "border-left: 4px solid #0071e3;" if is_ativa else "border-left: 4px solid transparent;"
+
             linha_widget.setStyleSheet(f"""
                 QWidget {{
                     background-color: {bg_cor};
                     border-radius: 4px;
+                    {borda_lateral}
                 }}
                 QWidget:hover {{
                     background-color: {hover_cor};
@@ -345,6 +431,33 @@ class MeawZikPlayerWindow(QMainWindow):
         self.atualizar_ui_fila()
         pl_nome = self.core.playlists[indice]['nome']
         self.lbl_status.setText(f"Playlist selecionada: {pl_nome}")
+
+    def solicitar_exclusao_playlist(self, indice):
+        """Solicita confirmação e exclui a playlist selecionada do histórico"""
+        if 0 <= indice < len(self.core.playlists):
+            playlist_alvo = self.core.playlists[indice]
+            nome = playlist_alvo['nome']
+            
+            # Caixa de diálogo de confirmação de segurança
+            resposta = QMessageBox.question(
+                self,
+                "Confirmar Exclusão",
+                f"Tem certeza de que deseja excluir permanentemente a playlist '{nome}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if resposta == QMessageBox.StandardButton.Yes:
+                sucesso, mensagem = self.core.excluir_playlist(indice)
+                if sucesso:
+                    # Se estavamos a ver o histórico, atualiza a view do histórico
+                    if self.a_ver_historico:
+                        self.exibir_historico_playlists()
+                    else:
+                        self.atualizar_ui_fila()
+                    self.lbl_status.setText(mensagem)
+                else:
+                    QMessageBox.warning(self, "Aviso", mensagem)
 
     def obter_caminho_icone(self, nome_base):
         """Retorna o caminho correto para o ícone .ico utilizando o resource_path"""

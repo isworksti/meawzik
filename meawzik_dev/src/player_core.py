@@ -89,8 +89,9 @@ class MeawZikCore:
             '--live-caching=3000',
             '--demux=any'                  # Garante flexibilidade no demuxer
         ]
-        self.vlc_instance = vlc.Instance(vlc_args)
+        self.vlc_instance = vlc.Instance()
         self.player = self.vlc_instance.media_player_new()
+        self.player_secundario = self.vlc_instance.media_player_new()
         
         self.resultados_pesquisa = []
         self.indice_atual = -1
@@ -129,6 +130,28 @@ class MeawZikCore:
                     self.playlist_ativa_indice = dados.get('playlist_ativa_indice', 0)
             except Exception as e:
                 print(f"Erro ao carregar playlists: {e}")
+
+    def excluir_playlist(self, indice):
+        """Exclui uma playlist pelo seu índice e reajusta a ativa se necessário"""
+        if 0 <= indice < len(self.playlists):
+            # Não deixa apagar se houver apenas 1 playlist (opcional, mas evita ficar sem nenhuma)
+            if len(self.playlists) <= 1:
+                return False, "Não é possível excluir a única playlist restante."
+            
+            playlist_removida = self.playlists.pop(indice)
+            
+            # Se a playlist excluída era a ativa, mudamos para a primeira (índice 0)
+            if self.playlist_ativa_indice == indice:
+                self.playlist_ativa_indice = 0
+                self.fila = self.playlists[0].get('faixas', [])
+                self.indice_atual = 0
+            elif self.playlist_ativa_indice > indice:
+                # Ajusta o ponteiro da ativa se apagou uma anterior
+                self.playlist_ativa_indice -= 1
+                
+            self.guardar_playlists_json()
+            return True, f"Playlist '{playlist_removida['nome']}' excluída com sucesso."
+        return False, "Índice de playlist inválido."
 
     def inicializar_playlists_iniciais(self):
         """Garante que ao abrir o programa exista pelo menos uma playlist padrão"""
@@ -199,8 +222,40 @@ class MeawZikCore:
             return True
 
     def definir_volume(self, volume):
-        if self.player:
+        """Define o volume principal do player VLC (0 a 100)"""
+        if hasattr(self, 'player') and self.player:
             self.player.audio_set_volume(max(0, min(100, int(volume))))
+
+    def definir_volume_temporario(self, volume):
+        """Define o volume diretamente no player principal sem afetar o estado global"""
+        if hasattr(self, 'player') and self.player:
+            self.player.audio_set_volume(max(0, min(100, int(volume))))
+
+    def definir_volume_secundario(self, volume):
+        """Define o volume do player secundário durante o crossfade"""
+        if hasattr(self, 'player_secundario') and self.player_secundario:
+            self.player_secundario.audio_set_volume(max(0, min(100, volume)))
+
+    def iniciar_crossfade_secundario(self, audio_url):
+        """Carrega e inicia a próxima faixa no player secundário com volume 0"""
+        try:
+            media = self.vlc_instance.media_new(audio_url)
+            self.player_secundario.set_media(media)
+            self.player_secundario.audio_set_volume(0)
+            self.player_secundario.play()
+            return True
+        except Exception as e:
+            print(f"Erro ao iniciar player secundário: {e}")
+            return False
+
+    def concluir_crossfade_troca(self):
+        """Termina o player principal antigo e promove o secundário a principal"""
+        try:
+            self.player.stop()
+            # Troca as referências para o secundário virar o principal
+            self.player, self.player_secundario = self.player_secundario, self.player
+        except Exception as e:
+            print(f"Erro ao concluir troca de crossfade: {e}")
 
     def get_tempo_atual(self):
         try: return self.player.get_time()
