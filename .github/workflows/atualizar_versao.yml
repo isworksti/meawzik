@@ -1,0 +1,29 @@
+def verificar_atualizacoes(self):
+        """Verifica no GitHub se existe uma nova versão disponível (executa apenas uma vez)"""
+        if self._ja_verificou_atualizacao:
+            return
+        
+        self._ja_verificou_atualizacao = True  # Marca como verificado para esta sessão
+        
+        url_version = "https://raw.githubusercontent.com/isworksti/meawzik/main/version.json"
+        versao_atual = "1.0.0"  # Altere para a sua versão atual real quando o app estiver estável
+        
+        try:
+            req = urllib.request.Request(url_version, headers={'User-Agent': 'MeawZik-Updater'})
+            with urllib.request.urlopen(req, timeout=3) as response:
+                dados = json.loads(response.read().decode('utf-8'))
+                versao_remota = dados.get("version")
+                zip_url = dados.get("zip_url")
+                changelog = dados.get("changelog", "Sem detalhes.")
+                
+                if versao_remota != versao_atual:
+                    resposta = QMessageBox.question(
+                        self,
+                        "Atualização Disponível",
+                        f"Existe uma nova versão do MeawZik ({versao_remota})!\n\nNovidades:\n{changelog}\n\nDeseja atualizar agora?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if resposta == QMessageBox.StandardButton.Yes:
+                        self.baixar_e_aplicar_atualizacao(zip_url)
+        except Exception as e:
+            print(f"Erro ao verificar atualizações: {e}")
